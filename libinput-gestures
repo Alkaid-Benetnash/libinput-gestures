@@ -19,7 +19,7 @@ CONFDIRS = (USERDIR, '/etc')
 OBLIQUE_RATIO = math.tan(math.radians(22.5))
 
 # Minimum significant distance to move for swipes, in dots squared.
-ABZSQUARE = 70**2
+ABZSQUARE = 250**2
 
 # Rotation threshold in degrees to discriminate pinch rotate from in/out
 ROTATE_ANGLE = 15.0
@@ -268,8 +268,8 @@ class GESTURE:
                 self.motions.get(motion)
 
         if args.verbose:
-            print('{}: {} {} {} {}'.format(PROG, self.name, motion,
-                self.fingers, self.data))
+            print('{}: {} {} {} {} {}'.format(PROG, self.name, motion,
+                self.fingers, self.data, math.sqrt(self.data[0]**2+self.data[1]**2)))
             if command:
                 print('  ', command)
 
@@ -280,22 +280,31 @@ class GESTURE:
 class SWIPE(GESTURE):
     'Class to handle this type of gesture'
     SUPPORTED_MOTIONS = ('left', 'right', 'up', 'down',
-            'left_up', 'right_up', 'left_down', 'right_down')
+            'left_up', 'right_up', 'left_down', 'right_down', 'begin', 'end')
     extended_text = '_'
 
-    def update(self, coords):
-        'Update this gesture for a motion'
-        self.data[0] += float(coords[2])
-        self.data[1] += float(coords[3])
+    def begin(self,fingers):
+        super().begin(fingers)
+        self.action('begin')
+        self.lasttime = 0.0
+        self.offset_threshold = 400**2
 
-    def end(self):
-        'Action this gesture at the end of a motion sequence'
+    def update(self, time, coords):
+        'Update this gesture for a motion'
+        time_f = float(time[:-1])
+        if time_f - self.lasttime < 0.5:
+            self.data[0] += float(coords[2])
+            self.data[1] += float(coords[3])
+        else:
+            self.data[0] = float(coords[2])
+            self.data[1] = float(coords[3])
+        self.lasttime = time_f
         x, y = self.data
         abx = abs(x)
         aby = abs(y)
 
         # Require absolute distance movement beyond a small thresh-hold.
-        if abx**2 + aby**2 < ABZSQUARE:
+        if abx**2 + aby**2 < self.offset_threshold:
             return
 
         # Discriminate left/right or up/down.
@@ -311,6 +320,14 @@ class SWIPE(GESTURE):
                 motion = ('left_' if x < 0 else 'right_') + motion
 
         self.action(motion)
+        self.data[0] = 0.0
+        self.data[1] = 0.0
+        self.offset_threshold = 150**2
+
+
+    def end(self):
+        'Action this gesture at the end of a motion sequence'
+        self.action('end')
 
 @add_gesture_handler
 class PINCH(GESTURE):
@@ -318,7 +335,7 @@ class PINCH(GESTURE):
     SUPPORTED_MOTIONS = ('in', 'out', 'clockwise', 'anticlockwise')
     extended_text = 'clock'
 
-    def update(self, coords):
+    def update(self, time, coords):
         'Update this gesture for a motion'
         self.data[0] += float(coords[4]) - 1.0
         self.data[1] += float(coords[5])
@@ -509,7 +526,7 @@ for line in cmd.stdout:
     if event == 'UPDATE':
         if handler:
             # Split parameters into list of clean numbers
-            handler.update(re.split(r'[^-.\d]+', params))
+            handler.update(time, re.split(r'[^-.\d]+', params))
     elif event == 'BEGIN':
         handler = handlers.get(gesture)
         if handler:
